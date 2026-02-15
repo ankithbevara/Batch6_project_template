@@ -17,19 +17,18 @@
 
 # Project Structure
 smarthub_operations_dashboard/
-|
-|-- backend/
-│   |-- main.py
-│   |-- requirements.txt
-│
-|-- frontend/
-│   |-- src/
-│   |-- public/
-│   |-- package.json
-│   |-- vite.config.ts
-│
-|--.gitignore
-|-- README.md
+  backend/
+    main.py
+    requirements.txt
+
+  frontend/
+    src/
+    public/
+    package.json
+    vite.config.ts
+
+.gitignore
+README.md
 
 # Backend Setup (FastAPI)
 1. Navigate to backend: cd backend
@@ -86,9 +85,9 @@ smarthub_operations_dashboard/
   Use .gitignore to exclude .venv, node_modules, .env
 
 # Features:
-  Shipment Status Monitoring
-  Exceptions Tracking
-  Vendor Performance View
-  Analytics Dashboard
-  Real-time operational insights
-  REST API integration with FastAPI backend
+  1. Shipment Status Monitoring
+  2. Exceptions Tracking
+  3. Vendor Performance View
+  4. Analytics Dashboard
+  5. Real-time operational insights
+  6. REST API integration with FastAPI backend
