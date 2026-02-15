@@ -1,0 +1,223 @@
+"""  
+    1. This FastAPI backend serves as a local API layer that connects to a MySQL database containing logistics data.
+    2. It provides various endpoints to fetch customers, vendors, shipment details, exceptions, and hub statuses.
+    3. The backend uses environment variables for database connection details and includes CORS middleware to allow requests from the frontend running on localhost:5173.
+    4. Each endpoint executes SQL queries to retrieve data from the database and returns it in a structured format for the frontend to consume.
+"""
+import os
+from typing import Optional, List, Dict, Any
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import pymysql
+load_dotenv()
+
+# This is a simple FastAPI backend that connects to a MySQL database to serve logistics-related data.
+MYSQL_HOST = os.getenv("MYSQL_HOST")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+MYSQL_DB = os.getenv("MYSQL_DB")
+
+if not all([MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB]):
+    raise RuntimeError("Missing MYSQL_* env vars in .env")
+
+app = FastAPI(title="Logistics Local APIs (MySQL)")
+
+# CORS middleware is added to allow requests from the frontend (running on localhost:5173).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Helper functions to interact with the MySQL database
+def fetch_all(sql: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
+    conn = pymysql.connect(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DB,
+        cursorclass=pymysql.cursors.DictCursor, # return results as dicts instead of tuples
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+def fetch_one(sql: str, params: tuple) -> Optional[Dict[str, Any]]:
+    rows = fetch_all(sql, params)
+    return rows[0] if rows else None
+
+# /api/customers- This endpoint returns a list of all customers in the system, ordered by their ID.
+@app.get("/api/customers")
+def get_customers():
+    return fetch_all("SELECT * FROM customers ORDER BY id")
+
+# /api/vendors- This endpoint returns a list of all vendors in the system, ordered by their ID.
+@app.get("/api/vendors")
+def get_vendors():
+    return fetch_all("SELECT * FROM vendors ORDER BY id")
+
+# /api/vendors/:id/performance
+@app.get("/api/vendors/{vendor_id}/performance")
+def get_vendor_performance(vendor_id: str):
+    row = fetch_one(
+        "SELECT * FROM vendor_performance WHERE vendor_id = %s ORDER BY calculation_date DESC LIMIT 1",
+        (vendor_id,),
+    )
+    return row or {"vendor_id": vendor_id, "message": "No performance found"}
+
+
+"""
+    /api/exceptions/live- This endpoint returns a list of recent shipment exceptions, including the shipment ID, exception type, message, and when the exception was raised.
+    The results are ordered by the most recent exceptions first and limited to a specified number (default 20).
+"""
+@app.get("/api/exceptions/live")
+def get_exceptions_live(limit: int = 20):
+    return fetch_all(
+        """
+        SELECT
+            id AS shipment_id,  -- Frontend expects 'shipment_id'
+            exception_type,
+            exception_notes AS message, -- Frontend expects 'message'
+            origin_city,    -- Fixes Dashboard '?'
+            destination_city,   -- Fixes Dashboard '?'
+            COALESCE(last_status_update, updated_ts) AS raised_at -- Frontend expects 'raised_at'
+        FROM shipments
+        WHERE has_exception = 1
+        ORDER BY raised_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+
+# /api/pod/search?q=... This endpoint allows searching for shipments based on the POD document URL, AWB number, or shipment ID.
+@app.get("/api/pod/search")
+def pod_search(q: str = Query(..., min_length=1), limit: int = 50):
+    like = f"%{q}%"
+    return fetch_all(
+        """
+        SELECT s.*, a.awb_number
+        FROM shipments s
+        JOIN awb_numbers a ON a.id = s.awb_id
+        WHERE a.awb_number LIKE %s
+            OR CAST(s.id AS CHAR) LIKE %s
+            OR s.pod_document_url LIKE %s
+        ORDER BY COALESCE(s.pod_upload_timestamp, s.updated_ts) DESC
+        LIMIT %s
+        """,
+        (like, like, like, limit),
+    )
+
+# /api/shipments- This endpoint returns a list of recent shipments with their current status, origin, destination, assigned vendor, and other relevant details.
+@app.get("/api/shipments")
+def get_shipments(limit: int = 200):
+    return fetch_all(
+        """
+        SELECT
+            s.id AS shipment_id,    -- Matches 'shipment_id' in frontend
+            a.awb_number,
+            s.origin_city AS origin,    -- Matches 'origin' in frontend
+            s.destination_city AS destination,  -- Matches 'destination'
+            s.current_status AS shipment_status,
+            h.hub_code AS current_hub_code,
+            s.assigned_vendor_id AS vendor_id,
+            s.expected_delivery_date AS eta,
+            COALESCE(s.last_status_update, s.updated_ts) AS last_updated_ts
+        FROM shipments s
+        JOIN awb_numbers a ON a.id = s.awb_id
+        LEFT JOIN hubs h ON h.id = s.current_hub_id
+        ORDER BY COALESCE(s.last_status_update, s.updated_ts) DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+# /api/shipments/summary- This endpoint provides a summary of the current shipment statuses, including the number of shipments in transit, exceptions, delayed shipments, and the on-time delivery rate.
+@app.get("/api/shipments/summary")
+def shipments_summary():
+    row = fetch_one(
+        """
+            SELECT
+            SUM(CASE WHEN current_status IN ('IN_TRANSIT','OUT_FOR_DELIVERY') THEN 1 ELSE 0 END) AS in_transit,
+            SUM(CASE WHEN has_exception = 1 THEN 1 ELSE 0 END) AS exceptions,
+            SUM(CASE WHEN current_status = 'DELAYED' THEN 1 ELSE 0 END) AS delayed_count,
+            SUM(CASE WHEN actual_delivery_date IS NOT NULL
+                AND expected_delivery_date IS NOT NULL
+                AND actual_delivery_date <= expected_delivery_date
+            THEN 1 ELSE 0 END) AS on_time_deliveries,
+            SUM(CASE WHEN actual_delivery_date IS NOT NULL THEN 1 ELSE 0 END) AS delivered_total
+            FROM shipments
+        """,
+        (),
+    )
+
+    delivered_total = int(row.get("delivered_total") or 0)
+    on_time = int(row.get("on_time_deliveries") or 0)
+    on_time_rate = round((on_time / delivered_total) * 100, 1) if delivered_total > 0 else 0.0
+
+    return {
+        "shipments_in_transit": int(row.get("in_transit") or 0),
+        "exceptions": int(row.get("exceptions") or 0),
+        "delayed_shipments": int(row.get("delayed_count") or 0),
+        "on_time_rate": on_time_rate,
+    }
+
+# for charts, we can add APIs like: This endpoint returns the count of shipments booked each day over the last 30 days, which can be used to visualize booking trends.
+@app.get("/api/shipments/trend")
+def shipments_trend():
+    return fetch_all(
+        """
+        SELECT
+            DATE(booking_date) AS day,
+            COUNT(*) AS value
+        FROM shipments
+        GROUP BY DATE(booking_date)
+        ORDER BY DATE(booking_date)
+        """
+    )
+
+# This endpoint returns the count of exceptions grouped by their type, ordered by the most common exception types first.
+@app.get("/api/exceptions/by-type")
+def exceptions_by_type():
+    return fetch_all(
+        """
+        SELECT
+            exception_type AS type,
+            COUNT(*) AS value
+        FROM shipments
+        WHERE has_exception = 1
+        GROUP BY exception_type
+        ORDER BY value DESC
+        """
+    )
+
+# This endpoint returns the status of all hubs, including whether they are operational, congested (20 or more shipments currently at the hub), or down (is_active = 0).
+@app.get("/api/hubs/status")
+def hubs_status(limit: int = 50):
+    return fetch_all(
+        """
+        SELECT
+            h.hub_code,
+            h.hub_name,
+            CASE
+                WHEN h.is_active = 0 THEN 'DOWN'
+                WHEN COUNT(s.id) >= 20 THEN 'CONGESTED'
+                ELSE 'OPERATIONAL'
+            END AS status,
+            COALESCE(h.updated_ts, h.created_ts) AS last_updated_ts
+        FROM hubs h
+        LEFT JOIN shipments s ON s.current_hub_id = h.id
+        GROUP BY h.id, h.hub_code, h.hub_name, h.is_active, h.updated_ts, h.created_ts
+        ORDER BY h.hub_code
+        LIMIT %s
+        """,
+        (limit,),
+    )

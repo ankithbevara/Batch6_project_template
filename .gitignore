@@ -1,0 +1,34 @@
+# log files
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# frontend ignored files
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+dist
+dist-ssr
+*.local
+
+# backend ignored files
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+*.env
+
+# editor and IDE files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
