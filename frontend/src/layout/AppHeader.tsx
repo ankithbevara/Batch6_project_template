@@ -1,13 +1,18 @@
 /**
  * AppHeader component serves as the header for the Logistics Control Tower dashboard.
- * It displays the title of the dashboard and a mock user name on the right side.
+ * It displays the title of the dashboard and the authenticated user's name on the right side.
  * The header is styled using Ant Design's Space and Typography components to ensure a clean and professional look.
  * The title is prominently displayed with a larger font size and bold weight, while the subtitle provides additional context in a smaller, lighter font.
- * The mock user name is displayed on the right side in a secondary text style to indicate that it's not the main focus of the header.
+ * The user name is displayed on the right side in a secondary text style.
  */
 import { Space, Typography } from "antd";
+import type { User } from "../context/AuthContext";
 
-export default function AppHeader() {
+type Props = {
+  user: User;
+};
+
+export default function AppHeader({ user }: Props) {
   return (
     <Space style={{ width: "100%", justifyContent: "space-between" }}>
       <div>
@@ -19,7 +24,9 @@ export default function AppHeader() {
         </div>
       </div>
 
-      <Typography.Text type="secondary">Mock User</Typography.Text>
+      <Typography.Text type="secondary">
+        {user.first_name} {user.last_name}
+      </Typography.Text>
     </Space>
   );
 }
