@@ -6,7 +6,7 @@
  * The selected menu item is highlighted based on the current URL path, providing visual feedback to the user about their current location in the app.
  */
 import React, { useMemo } from "react";
-import { Menu, Avatar, Typography, Space } from "antd";
+import { Menu, Avatar, Typography, Button, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -16,26 +16,37 @@ import {
     FileSearchOutlined,
     BarChartOutlined,
     UserOutlined,
+    LogoutOutlined,
 } from "@ant-design/icons";
+import { useAuth, type User } from "../context/AuthContext";
 
 
-type Role = "ADMIN" | "OPS" | "VENDOR_MGR" | "ANALYST";
-type Props = { role: Role | string };
+type Role = "SUPER_ADMIN" | "OPS_MANAGER" | "VENDOR_USER" | "ANALYST";
+type Props = {
+    role: Role | string;
+    user: User;
+};
 
 type Item = { key: string; label: string; icon: React.ReactNode; path: string; roles: Role[] };
 
 // Define the AppSidebar component which takes a user role as a prop and renders a sidebar with navigation items based on that role
-export default function AppSidebar({ role }: Props) {
+export default function AppSidebar({ role, user }: Props) {
     const nav = useNavigate();
     const { pathname } = useLocation();
+    const { logout } = useAuth();
+
+    const handleLogout = () => {
+        logout();
+        nav('/login');
+    };
 
     const items: Item[] = useMemo(
         () => [
-            { key: "home", label: "Dashboard", icon: <DashboardOutlined />, path: "/", roles: ["ADMIN","OPS","VENDOR_MGR","ANALYST"] },
-            { key: "ops", label: "Operations", icon: <DeploymentUnitOutlined />, path: "/operations", roles: ["ADMIN","OPS"] },
-            { key: "vendors", label: "Vendors", icon: <TeamOutlined />, path: "/vendors", roles: ["ADMIN","VENDOR_MGR"] },
-            { key: "docs", label: "Documents", icon: <FileSearchOutlined />, path: "/documents", roles: ["ADMIN","OPS","VENDOR_MGR"] },
-            { key: "analytics", label: "Analytics", icon: <BarChartOutlined />, path: "/analytics", roles: ["ADMIN","ANALYST"] },
+            { key: "home", label: "Dashboard", icon: <DashboardOutlined />, path: "/", roles: ["SUPER_ADMIN","OPS_MANAGER","VENDOR_USER","ANALYST"] },
+            { key: "ops", label: "Operations", icon: <DeploymentUnitOutlined />, path: "/operations", roles: ["SUPER_ADMIN","OPS_MANAGER"] },
+            { key: "vendors", label: "Vendors", icon: <TeamOutlined />, path: "/vendors", roles: ["SUPER_ADMIN","VENDOR_USER"] },
+            { key: "docs", label: "Documents", icon: <FileSearchOutlined />, path: "/documents", roles: ["SUPER_ADMIN","OPS_MANAGER","VENDOR_USER"] },
+            { key: "analytics", label: "Analytics", icon: <BarChartOutlined />, path: "/analytics", roles: ["SUPER_ADMIN","ANALYST"] },
         ],
         [] // static items, no dependencies needed
     );
@@ -50,10 +61,10 @@ export default function AppSidebar({ role }: Props) {
 
     const selectedKey = filtered.some((i) => i.path === pathname) ? pathname : "/"; // default to home if current path isn't in menu
     return (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                <Typography.Text style={{ 
-                    color: "#ffffff", 
+        <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+                <Typography.Text style={{
+                    color: "#ffffff",
                     fontWeight: 600,
                     letterSpacing: 0.4,
                     fontSize: 16,}}>
@@ -61,23 +72,31 @@ export default function AppSidebar({ role }: Props) {
                 </Typography.Text>
             </div>
 
-            <div style={{ flex: 1, padding: "8px 0" }}>
+            <div style={{ flex: 1, padding: "8px 0", overflow: "auto" }}>
                 <Menu theme="dark" mode="inline" selectedKeys={[selectedKey]} items={menuItems} />
             </div>
 
-            <div style={{ padding: 14, borderTop: "1px solid rgba(186, 29, 29, 0.08)" }}>
-                <Space>
+            <div style={{ padding: 14, borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <Avatar icon={<UserOutlined />} />
-                    <div style={{ lineHeight: 1.1 }}>
+                    <div style={{ flex: 1, lineHeight: 1.1 }}>
                         <Typography.Text style={{ color: "#ffffff", fontWeight: 600 }}>
-                            Mock User
+                            {user ? `${user.first_name} ${user.last_name}` : "User"}
                         </Typography.Text>
                         <br />
                         <Typography.Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 12 }}>
-                            Role: {String(role)}
+                            {String(role)}
                         </Typography.Text>
                     </div>
-                </Space>
+                    <Tooltip title="Logout">
+                        <Button
+                            type="text"
+                            icon={<LogoutOutlined />}
+                            onClick={handleLogout}
+                            style={{ color: "rgba(255,255,255,0.65)" }}
+                        />
+                    </Tooltip>
+                </div>
             </div>
         </div>
     );

@@ -6,10 +6,11 @@
 """
 import os
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import pymysql
+from auth import LoginRequest, LoginResponse, UserResponse, verify_password, create_access_token
 load_dotenv()
 
 # This is a simple FastAPI backend that connects to a MySQL database to serve logistics-related data.
@@ -53,6 +54,67 @@ def fetch_all(sql: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
 def fetch_one(sql: str, params: tuple) -> Optional[Dict[str, Any]]:
     rows = fetch_all(sql, params)
     return rows[0] if rows else None
+
+# Authentication endpoint for user login with JWT token generation
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(req: LoginRequest):
+    """
+    Authenticate user with username/email and password.
+    Returns JWT access token and user data if credentials are valid.
+    """
+    # Query user from database with role information
+    user = fetch_one(
+        """
+        SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.phone,
+               u.password_hash, u.is_active, r.role_code
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE (u.username = %s OR u.email = %s)
+        """,
+        (req.username_or_email, req.username_or_email),
+    )
+
+    # Check if user exists
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password",
+        )
+
+    # Check if user account is active
+    if not user.get("is_active"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive. Please contact administrator.",
+        )
+
+    # Verify password
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password",
+        )
+
+    # Create JWT token with user ID, username, and role
+    token_data = {
+        "sub": str(user["id"]),  # subject = user ID
+        "username": user["username"],
+        "role": user["role_code"],
+    }
+    access_token = create_access_token(token_data)
+
+    # Prepare user response (exclude password_hash)
+    user_response = UserResponse(
+        id=user["id"],
+        username=user["username"],
+        email=user["email"],
+        first_name=user["first_name"],
+        last_name=user["last_name"],
+        role_code=user["role_code"],
+        phone=user.get("phone"),
+    )
+
+    return LoginResponse(access_token=access_token, user=user_response)
 
 # /api/customers- This endpoint returns a list of all customers in the system, ordered by their ID.
 @app.get("/api/customers")
